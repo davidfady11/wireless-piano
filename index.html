@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FM Wireless Theremin Receiver - David 24020092</title>
+  <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+  <style>
+    :root {
+      --bg:#050b1b; --panel:#0b1730; --panel2:#102344; --line:#1b4b83;
+      --cyan:#19d8ff; --purple:#bd62ff; --green:#13d995; --red:#ff426b;
+      --text:#f4f7ff; --muted:#91a8ce;
+    }
+    * { box-sizing:border-box; }
+    body {
+      font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;
+      background:radial-gradient(ellipse at 50% -15%,#15295a 0%,#08142c 42%,var(--bg) 78%);
+      color:var(--text); margin:0; padding:18px 14px 32px;
+      display:flex; flex-direction:column; align-items:center; min-height:100vh;
+    }
+    .app { width:100%; max-width:760px; }
+    .header { text-align:center; margin:4px 0 18px; padding:8px 4px 16px; position:relative; }
+    .brand { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:12px; }
+    .brand-icon { color:var(--cyan); font-size:1.8rem; filter:drop-shadow(0 0 10px #19d8ff88); }
+    .header h1 { font-size:clamp(1.15rem,4vw,1.65rem); margin:0; line-height:1.3; letter-spacing:.2px; }
+    .subtitle { color:var(--muted); font-size:.82rem; margin-top:4px; }
+    .status-badge { display:inline-flex; align-items:center; gap:8px; padding:7px 14px; border-radius:30px; font-size:.78rem; font-weight:700; background:#192a48; }
+    .status-online { background:#063b35; color:#48f0bd; border:1px solid #0eaa83; box-shadow:0 0 16px #13d99522; }
+    .status-offline { background:#3b1b32; color:#ff8ba5; border:1px solid #a93259; }
+    .grid { display:grid; grid-template-columns:1fr; gap:14px; width:100%; }
+    .card { min-width:0; background:linear-gradient(145deg,rgba(16,38,75,.96),rgba(8,20,43,.98)); border:1px solid #20518a; border-radius:20px; padding:15px; box-shadow:0 10px 28px #0005,inset 0 1px 0 #ffffff0c; overflow:hidden; }
+    .card.signal-card { border-color:#2464a7; box-shadow:0 0 22px #1489ff12,inset 0 1px 0 #ffffff12; }
+    .card h3 { margin:0 0 13px; color:#edf5ff; font-size:1rem; display:flex; align-items:center; gap:9px; }
+    .section-icon { color:var(--cyan); font-size:1.2rem; }
+    .graph-panel { background:#061329; border:1px solid #163d69; border-radius:14px; padding:10px; margin-top:10px; overflow:hidden; }
+    .graph-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:7px; font-size:.82rem; font-weight:700; }
+    .graph-heading.fm { color:#73eaff; }
+    .graph-heading.demod { color:#d49aff; }
+    .graph-tag { font-size:.65rem; padding:4px 8px; border-radius:20px; background:#07304b; border:1px solid #087da9; white-space:nowrap; }
+    .graph-tag.purple { background:#2a1746; border-color:#7040a7; }
+    canvas { display:block; width:100%; height:112px; background:linear-gradient(180deg,#06182d,#071126); border-radius:9px; border:1px solid #102e50; }
+    .metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); text-align:center; margin-top:12px; background:#0a1b36; border:1px solid #1b4778; border-radius:14px; padding:12px 4px; }
+    .metric { min-width:0; padding:0 3px; }
+    .metric + .metric { border-left:1px solid #24466f; }
+    .metric-val { font-size:clamp(1rem,4vw,1.3rem); font-weight:800; color:#fff; overflow-wrap:anywhere; }
+    .metric-val.cyan { color:var(--cyan); }
+    .metric-val.purple { color:var(--purple); }
+    .metric-lbl { font-size:.68rem; color:var(--muted); margin-top:4px; line-height:1.4; }
+    .control-row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+    button { background:linear-gradient(135deg,#0aa9e7,#0877d2); color:white; border:1px solid #35cfff66; padding:11px 14px; border-radius:12px; font-weight:700; cursor:pointer; font-size:.85rem; margin:0; min-height:42px; box-shadow:0 4px 14px #008bd322; }
+    button:active { transform:scale(.98); }
+    button.btn-danger { background:linear-gradient(135deg,#ff5278,#bd174c); border-color:#ff7896; color:#fff; }
+    button.btn-green { background:linear-gradient(135deg,#13d995,#07996e); border-color:#45f0bd; color:#03251e; }
+    button.btn-purple { background:linear-gradient(135deg,#a64cff,#6426d8); border-color:#d09aff; color:white; }
+    #modeBtn { background:#111f3d; color:#c9a4ff; border-color:#7546a8; }
+    .piano { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:5px; margin-top:8px; direction:ltr; }
+    .key { min-width:0; height:76px; background:linear-gradient(180deg,#f5f7ff,#cbd9f2); color:#101b35; border-radius:9px; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; padding:7px 1px; font-weight:800; font-size:clamp(.68rem,2.8vw,.85rem); transition:.12s; border:1px solid #fff; text-align:center; }
+    .key span { font-size:clamp(.48rem,2vw,.61rem); color:#475a7b; margin-top:4px; font-weight:600; white-space:nowrap; }
+    .key.active { background:linear-gradient(180deg,#39eaff,#00a8dc); color:#04172b; transform:translateY(2px); box-shadow:0 0 18px #19d8ff99; border-color:#8af5ff; }
+    .key.target { outline:2px solid var(--green); outline-offset:1px; }
+    .hint { font-size:.72rem; color:var(--muted); text-align:center; margin-top:10px; line-height:1.6; }
+    .song-description { color:#b8c9e5; font-size:.84rem; line-height:1.6; margin:0 0 12px; }
+    .song-box { background:#0a1730; padding:13px 10px; border-radius:12px; margin-top:11px; text-align:center; border:1px dashed #9c5cff; color:#e2d2ff; font-size:.85rem; line-height:1.6; }
+    .hardware-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+    .hardware-actions button { width:100%; }
+    .lcd-row { display:flex; gap:8px; align-items:stretch; }
+    input[type="text"] { min-width:0; flex:1; width:100%; padding:10px 12px; border-radius:11px; border:1px solid #315b8b; background:#07152c; color:#fff; font-size:.85rem; }
+    input[type="text"]::placeholder { color:#8299bc; }
+    .lcd-row button { flex-shrink:0; }
+    @media (min-width:700px) {
+      body { padding-top:28px; }
+      .app { max-width:900px; }
+      .grid { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
+      .signal-card { grid-column:1 / -1; }
+      .card { padding:18px; }
+      canvas { height:135px; }
+    }
+    @media (max-width:360px) {
+      body { padding:12px 9px 24px; }
+      .card { padding:12px; border-radius:16px; }
+      .piano { gap:3px; }
+      .key { height:68px; border-radius:7px; }
+      .key span { letter-spacing:-.3px; }
+      .hardware-actions { gap:6px; }
+      .hardware-actions button { padding:9px 5px; font-size:.75rem; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div class="brand"><span class="brand-icon">〰</span><div><h1>FM Wireless Ultrasonic Theremin</h1><div class="subtitle">RECEIVER · LIVE SIGNAL MONITORING</div></div></div>
+      <div id="connStatus" class="status-badge status-offline">Connecting to MQTT Broker...</div>
+    </header>
+
+    <div class="grid">
+      <section class="card signal-card">
+        <h3><span class="section-icon">⌁</span> Wireless Signal Monitoring</h3>
+        <div class="graph-panel">
+          <div class="graph-heading fm"><span>FM Modulated Signal</span><span class="graph-tag">LIVE · CARRIER</span></div>
+          <canvas id="waveCanvas" width="600" height="150" aria-label="FM modulated signal graph"></canvas>
+        </div>
+        <div class="graph-panel">
+          <div class="graph-heading demod"><span>Demodulated Signal · Original Note</span><span class="graph-tag purple">AUDIO · BASEBAND</span></div>
+          <canvas id="demodCanvas" width="600" height="150" aria-label="Demodulated audio signal graph"></canvas>
+        </div>
+        <div class="metrics">
+          <div class="metric"><div class="metric-val cyan" id="fmFreqVal">10.0 Hz</div><div class="metric-lbl">FM Frequency</div></div>
+          <div class="metric"><div class="metric-val purple" id="distVal">-- cm</div><div class="metric-lbl">Distance</div></div>
+          <div class="metric"><div class="metric-val" id="noteVal">REST</div><div class="metric-lbl">Current Note</div></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3><span class="section-icon">♫</span> Wireless Piano &amp; Audio Output</h3>
+        <div class="control-row">
+          <button id="audioBtn" class="btn-green" onclick="toggleAudio()">🔊 Start Audio</button>
+          <button id="modeBtn" onclick="toggleAudioMode()">Mode: Demodulated Note</button>
+        </div>
+        <div class="piano">
+          <div class="key" id="key-1">Do<span>3 cm</span></div>
+          <div class="key" id="key-2">Re<span>6 cm</span></div>
+          <div class="key" id="key-3">Mi<span>9 cm</span></div>
+          <div class="key" id="key-4">Fa<span>12 cm</span></div>
+          <div class="key" id="key-5">Sol<span>15 cm</span></div>
+          <div class="key" id="key-6">La<span>18 cm</span></div>
+          <div class="key" id="key-7">Si<span>20 cm</span></div>
+        </div>
+        <div class="hint">On mobile, tap Start Audio. If you hear no sound, check that your phone is not in Silent mode.</div>
+      </section>
+
+      <section class="card">
+        <h3><span class="section-icon">♫</span> Guided Melody Challenge</h3>
+        <p class="song-description">Move your hand in front of the sensor to each target distance to play the complete melody.</p>
+        <button class="btn-purple" onclick="startSong()">🎵 Start Challenge</button>
+        <div class="song-box" id="songPrompt">Press “Start Challenge” to see the target note.</div>
+      </section>
+
+      <section class="card">
+        <h3><span class="section-icon">⚙</span> Two-Way Hardware Control</h3>
+        <div class="hardware-actions">
+          <button class="btn-danger" onclick="sendCmd('MUTE')">🔇 Mute</button>
+          <button class="btn-green" onclick="sendCmd('UNMUTE')">🔊 Unmute</button>
+        </div>
+        <div class="lcd-row">
+          <input type="text" id="lcdMsg" maxlength="16" placeholder="Enter a message for the LCD...">
+          <button onclick="sendLcdMsg()">Send</button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+
+    const topicTx = "benha/telemetry/david_24020092/fm_theremin";
+    const topicRx = "benha/telemetry/david_24020092/fm_control";
+
+    const FC = 10.0, KF = 3.5;
+    const NOTE_NAMES = ["REST", "Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
+    const NOTE_FREQS = [0, 523.25, 587.33, 659.25, 698.46, 783.99, 880.00, 987.77];
+
+    // ===== Audio duration settings =====
+    const MIN_NOTE_MS = 700;     // Minimum note duration in milliseconds
+    const RELEASE_TAU = 0.25;    // Release speed (higher value = longer fade-out)
+    const DECAY_TAU   = 0.6;     // Volume decay after the initial attack (higher value = longer decay)
+    const SUSTAIN_LVL = 0.5;     // Sustain level while the hand remains in position
+
+    const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", {
+      clientId: "WebRx_David_" + Math.random().toString(16).substr(2, 6)
+    });
+
+    let currentFmFreq = FC;
+    let currentDemodIdx = 0;
+    let audioCtx = null, osc1 = null, osc2 = null, gainNode = null;
+    let audioEnabled = false, rawMode = false;
+    let playingNote = 0;
+    let noteStart = 0;
+    let releaseTimer = null;
+    let prevIdx = 0;
+    let lastMsgTime = 0;
+    let isMuted = false;
+
+    const melody = [
+      { idx: 1, label: "Do (3 cm)" },
+      { idx: 3, label: "Mi (9 cm)" },
+      { idx: 5, label: "Sol (15 cm)" },
+      { idx: 6, label: "La (18 cm)" },
+      { idx: 5, label: "Sol (15 cm)" },
+      { idx: 3, label: "Mi (9 cm)" },
+      { idx: 1, label: "Do (3 cm)" }
+    ];
+    let songActive = false, songStep = 0;
+
+    function setStatus(online, text) {
+      const b = document.getElementById("connStatus");
+      b.innerText = text;
+      b.className = "status-badge " + (online ? "status-online" : "status-offline");
+    }
+    client.on("connect", () => { setStatus(true, "✅ Connected to MQTT Broker"); client.subscribe(topicTx); });
+    client.on("reconnect", () => setStatus(false, "Reconnecting..."));
+    client.on("offline", () => setStatus(false, "❌ Disconnected"));
+
+    function demodulate(fmFreq) {
+      const idx = Math.round((fmFreq - FC) / KF);
+      return Math.max(0, Math.min(7, idx));
+    }
+
+    client.on("message", (topic, message) => {
+      if (topic !== topicTx) return;
+      let data;
+      try { data = JSON.parse(message.toString()); } catch (e) { return; }
+
+      lastMsgTime = Date.now();
+      currentFmFreq = data.fmFreq;
+      isMuted = !!data.muted;
+      const idx = demodulate(data.fmFreq);
+      currentDemodIdx = isMuted ? 0 : idx;
+
+      document.getElementById("fmFreqVal").innerText = data.fmFreq.toFixed(1) + " Hz";
+      document.getElementById("distVal").innerText = data.dist > 100 ? "Out" : data.dist.toFixed(1) + " cm";
+      document.getElementById("noteVal").innerText = isMuted ? "MUTED" : NOTE_NAMES[idx];
+
+      for (let i = 1; i <= 7; i++) {
+        const k = document.getElementById("key-" + i);
+        k.classList.toggle("active", !isMuted && idx === i);
+        k.classList.toggle("target", songActive && melody[songStep].idx === i);
+      }
+
+      updateSound(idx, isMuted, data.fmFreq);
+
+      if (songActive && !isMuted && idx !== prevIdx && idx === melody[songStep].idx) {
+        songStep++;
+        if (songStep >= melody.length) {
+          songActive = false;
+          document.getElementById("songPrompt").innerHTML = "🎉 <b>Congratulations! You completed the melody!</b>";
+        } else {
+          document.getElementById("songPrompt").innerHTML = `Step (${songStep + 1}/${melody.length}): Move your hand to <b>${melody[songStep].label}</b>`;
+        }
+      }
+      prevIdx = idx;
+    });
+
+    setInterval(() => {
+      if (audioEnabled && playingNote !== 0 && Date.now() - lastMsgTime > 1500) releaseSound();
+    }, 300);
+
+    function toggleAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        osc1 = audioCtx.createOscillator();
+        osc2 = audioCtx.createOscillator();
+        gainNode = audioCtx.createGain();
+        gainNode.gain.value = 0;
+        osc1.connect(gainNode); osc2.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        osc1.start(); osc2.start();
+      }
+      audioEnabled = !audioEnabled;
+      const btn = document.getElementById("audioBtn");
+      if (audioEnabled) {
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        btn.innerText = "🔇 Stop Audio";
+        btn.className = "btn-danger";
+      } else {
+        releaseSound();
+        btn.innerText = "🔊 Start Audio";
+        btn.className = "btn-green";
+      }
+    }
+
+    function toggleAudioMode() {
+      rawMode = !rawMode;
+      releaseSound();
+      document.getElementById("modeBtn").innerText = rawMode
+        ? "Mode: Raw FM Carrier (Before Demodulation)"
+        : "Mode: Demodulated Note";
+    }
+
+    function cancelPendingRelease() {
+      if (releaseTimer) { clearTimeout(releaseTimer); releaseTimer = null; }
+    }
+
+    function releaseSound() {
+      cancelPendingRelease();
+      playingNote = 0;
+      if (!gainNode) return;
+      const now = audioCtx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.setTargetAtTime(0, now, RELEASE_TAU);
+    }
+
+    function requestRelease() {
+      if (playingNote === 0 || releaseTimer) return;
+      const remain = MIN_NOTE_MS - (Date.now() - noteStart);
+      if (remain <= 0) releaseSound();
+      else releaseTimer = setTimeout(() => { releaseTimer = null; releaseSound(); }, remain);
+    }
+
+    function noteOn(idx) {
+      cancelPendingRelease();
+      const now = audioCtx.currentTime;
+      playingNote = idx;
+      noteStart = Date.now();
+      osc1.type = "triangle";
+      osc2.type = "sine";
+      osc1.frequency.setValueAtTime(NOTE_FREQS[idx], now);
+      osc2.frequency.setValueAtTime(NOTE_FREQS[idx] * 2, now);
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.linearRampToValueAtTime(0.8, now + 0.02);
+      gainNode.gain.setTargetAtTime(SUSTAIN_LVL, now + 0.02, DECAY_TAU);
+    }
+
+    function updateSound(idx, muted, fmFreq) {
+      if (!audioEnabled || !gainNode) return;
+
+      if (muted) {
+        if (playingNote !== 0) releaseSound();
+        return;
+      }
+      if (idx === 0) {
+        requestRelease();
+        return;
+      }
+
+      if (rawMode) {
+        const now = audioCtx.currentTime;
+        osc1.type = "sawtooth"; osc2.type = "square";
+        osc1.frequency.setValueAtTime(fmFreq * 25, now);
+        osc2.frequency.setValueAtTime(fmFreq * 25.5, now);
+        if (playingNote === 0) {
+          gainNode.gain.cancelScheduledValues(now);
+          gainNode.gain.setTargetAtTime(0.2, now, 0.02);
+          noteStart = Date.now();
+        }
+        cancelPendingRelease();
+        playingNote = idx;
+        return;
+      }
+
+      if (idx !== playingNote) noteOn(idx);
+      else cancelPendingRelease();
+    }
+
+    function startSong() {
+      songActive = true; songStep = 0;
+      document.getElementById("songPrompt").innerHTML = `Step (1/${melody.length}): Move your hand to <b>${melody[0].label}</b>`;
+    }
+    function sendCmd(cmd) { client.publish(topicRx, cmd); }
+    function sendLcdMsg() {
+      const el = document.getElementById("lcdMsg");
+      const txt = el.value.trim();
+      if (txt) { client.publish(topicRx, "MSG:" + txt); el.value = ""; }
+    }
+
+    const canvas = document.getElementById("waveCanvas");
+    const ctx = canvas.getContext("2d");
+    let animPhase = 0;
+    function drawWave() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      const midY = canvas.height / 2, amp = 55;
+      for (let x = 0; x < canvas.width; x++) {
+        const t = x / canvas.width;
+        const y = midY + amp * Math.sin(2 * Math.PI * (currentFmFreq * 0.4) * t + animPhase);
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      animPhase -= 0.12;
+      requestAnimationFrame(drawWave);
+    }
+    drawWave();
+
+    // Visualizes the recovered audio/baseband note. This is display-only;
+    // the original demodulation and audio-generation logic above is unchanged.
+    const demodCanvas = document.getElementById("demodCanvas");
+    const demodCtx = demodCanvas.getContext("2d");
+    let demodPhase = 0;
+    function drawDemodWave() {
+      const w = demodCanvas.width, h = demodCanvas.height;
+      demodCtx.clearRect(0, 0, w, h);
+      demodCtx.strokeStyle = "#bd62ff";
+      demodCtx.lineWidth = 3;
+      demodCtx.shadowColor = "#bd62ff";
+      demodCtx.shadowBlur = 10;
+      demodCtx.beginPath();
+      const midY = h / 2, amp = currentDemodIdx === 0 ? 0 : 43;
+      const noteHz = NOTE_FREQS[currentDemodIdx] || 0;
+      const cycles = noteHz ? Math.max(2, Math.min(9, noteHz / 110)) : 0;
+      for (let x = 0; x < w; x++) {
+        const t = x / w;
+        const y = midY + amp * Math.sin(2 * Math.PI * cycles * t + demodPhase);
+        if (x === 0) demodCtx.moveTo(x, y); else demodCtx.lineTo(x, y);
+      }
+      demodCtx.stroke();
+      demodCtx.shadowBlur = 0;
+      demodPhase -= 0.08;
+      requestAnimationFrame(drawDemodWave);
+    }
+    drawDemodWave();
+  </script>
+</body>
+</html>
